@@ -14,27 +14,38 @@ const db = mysql.createConnection({
   port: 3306
 });
 
-app.get('/test-connection', (req, res) => {
-  db.connect(err => {
+db.connect(err => {
+  if (err) {
+    console.error('Erro ao conectar ao MySQL:', err);
+  } else {
+    console.log('Conectado ao MySQL com sucesso!');
+  }
+});
+
+app.use(express.json());
+
+app.post('/login', (req, res) => {
+  const { usuario, senha } = req.body;
+
+  const sql = `
+    SELECT * FROM tb_users 
+    WHERE (user_email = ? OR user_celular = ?) 
+      AND user_senha = ?
+  `;
+
+  db.query(sql, [usuario, usuario, senha], (err, results) => {
     if (err) {
-      console.error('Erro ao conectar:', err);
-      res.status(500).json({ success: false, message: 'Erro na conexão' });
+      console.error('Erro ao buscar usuário:', err);
+      return res.status(500).json({ success: false, message: 'Erro interno no servidor' });
+    }
+
+    if (results.length > 0) {
+      res.json({ success: true, message: 'Login realizado com sucesso' });
     } else {
-      res.json({ success: true, message: 'Conectado ao MySQL com sucesso!' });
+      res.status(401).json({ success: false, message: 'Usuário não localizado ou dados incorretos.' });
     }
   });
 });
-
-app.get('/users', (req, res) => {
-    db.query('SELECT * FROM tb_users', (err, results) => {
-      if (err) {
-        console.error('Erro ao buscar usuários:', err);
-        res.status(500).json({ message: 'Erro ao buscar usuários' });
-      } else {
-        res.json(results);
-      }
-    });
-  });
 
 const PORT = 3000;
 app.listen(PORT, () => {
