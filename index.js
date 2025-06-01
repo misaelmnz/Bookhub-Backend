@@ -11,8 +11,8 @@ const db = mysql.createConnection({
   host: 'localhost',
   user: 'root',
   password: '',
-  database: 'bookhub',
-  port: 3307
+  database: 'db_bookhub',
+  port: 3306
 });
 
 db.connect(err => {
@@ -23,27 +23,27 @@ db.connect(err => {
   }
 });
 
-  app.post('/pesquisar', (req, res) => {
-    const { pesquisa } = req.body;
-    const pesquisaFormatada = `%${pesquisa}%`;
+app.post('/pesquisar', (req, res) => {
+  const { pesquisa } = req.body;
+  const pesquisaFormatada = `%${pesquisa}%`;
 
-    const sql = `
+  const sql = `
     SELECT * FROM tb_publicacoes WHERE pub_titulo LIKE ?
     `;
 
-    db.query(sql, [pesquisaFormatada], (err, results) => {
-      if (err) {
-        console.error('Erro ao buscar publicações:', err);
-        return res.status(500).json({ success: false, message: 'Erro ao buscar publicações', error: err });
-      }
+  db.query(sql, [pesquisaFormatada], (err, results) => {
+    if (err) {
+      console.error('Erro ao buscar publicações:', err);
+      return res.status(500).json({ success: false, message: 'Erro ao buscar publicações', error: err });
+    }
 
-      if (results.length === 0) {
-        return res.status(404).json({ success: false, message: 'Nenhuma publicação encontrada' });
-      }
+    if (results.length === 0) {
+      return res.status(404).json({ success: false, message: 'Nenhuma publicação encontrada' });
+    }
 
-      res.json({ success: true, data: results });
-    })
+    res.json({ success: true, data: results });
   })
+})
 
 app.post('/login', (req, res) => {
   const { usuario, senha } = req.body;
@@ -124,13 +124,14 @@ app.post('/cadastro', (req, res) => {
   });
 });
 
-app.get('/receberPUBS', (req, res) => {  
+app.get('/receberPUBS', (req, res) => {
 
   const sql = `
     SELECT 
       p.pub_id,
       p.pub_titulo,
       p.pub_tipo,
+      p.pub_valor,
       i.item_tipo,
       img.imagem_caminho AS imagem
     FROM tb_publicacoes p
@@ -145,7 +146,7 @@ app.get('/receberPUBS', (req, res) => {
     }
     res.json({ success: true, data: results });
   });
-}); 
+});
 
 app.post('/popularAleatorio', (req, res) => {
   const numRegistros = req.body.qtd || 10;
@@ -154,7 +155,7 @@ app.post('/popularAleatorio', (req, res) => {
     if (i >= numRegistros) {
       return res.json({ success: true, message: `${numRegistros} registros inseridos com sucesso!` });
     }
-      const item = {
+    const item = {
       isbn: faker.string.numeric(13),
       titulo: faker.commerce.productName(),
       autor: faker.person.fullName(),
@@ -173,7 +174,7 @@ app.post('/popularAleatorio', (req, res) => {
           return res.status(500).json({ success: false, error: err.message });
         }
         const itemId = itemResult.insertId;
-        
+
         db.query('SELECT user_id FROM tb_users ORDER BY RAND() LIMIT 1', (err, userResults) => {
           if (err) {
             console.error('Erro ao buscar usuário aleatório:', err);
@@ -184,38 +185,82 @@ app.post('/popularAleatorio', (req, res) => {
           }
           const userId = userResults[0].user_id;
 
-        const pub = {
-          titulo: faker.commerce.productName(),
-          tipoVenda: faker.helpers.arrayElement([1,2,3]),
-          idItem: itemId,
-          userId: userId
-        };
+          const pub = {
+            titulo: faker.commerce.productName(),
+            tipoVenda: faker.helpers.arrayElement([1, 2, 3]),
+            idItem: itemId,
+            userId: userId
+          };
 
-        db.query(
-          'INSERT INTO tb_publicacoes (pub_titulo, pub_tipo, item_id, user_id) VALUES (?, ?, ?, ?)',
-          [pub.titulo, pub.tipoVenda, pub.idItem, pub.userId],
-          (err, pubResult) => {
-            if (err) {
-              console.error('Erro ao inserir publicação:', err);
-              return res.status(500).json({ success: false, error: err.message });
-            }
-            const pubId = pubResult.insertId;
+          db.query(
+            'INSERT INTO tb_publicacoes (pub_titulo, pub_tipo, item_id, user_id) VALUES (?, ?, ?, ?)',
+            [pub.titulo, pub.tipoVenda, pub.idItem, pub.userId],
+            (err, pubResult) => {
+              if (err) {
+                console.error('Erro ao inserir publicação:', err);
+                return res.status(500).json({ success: false, error: err.message });
+              }
+              const pubId = pubResult.insertId;
 
-            // Inserir imagem
-            const imagemUrl = faker.image.url();
-            db.query(
-              'INSERT INTO tb_imagens (id_pub, imagem_caminho) VALUES (?, ?)',
-              [pubId, imagemUrl],
-              (err) => {
-                if (err) {
-                  console.error('Erro ao inserir imagem:', err);
-                  return res.status(500).json({ success: false, error: err.message });
-                }
-                inserirProximo(i + 1);
+              // Inserir imagem
+              const imagemUrl = faker.image.url();
+              db.query(
+                'INSERT INTO tb_imagens (id_pub, imagem_caminho) VALUES (?, ?)',
+                [pubId, imagemUrl],
+                (err) => {
+                  if (err) {
+                    console.error('Erro ao inserir imagem:', err);
+                    return res.status(500).json({ success: false, error: err.message });
+                  }
+                  inserirProximo(i + 1);
 
-              });});});});}
+                });
+            });
+        });
+      });
+  }
 
   inserirProximo(0);
+});
+
+app.get('/detalhesPUB/:pubId', (req, res) => {
+  const { pubId } = req.params;
+
+  const sql = `
+    SELECT 
+      p.pub_id,
+      p.pub_titulo,
+      p.pub_tipo,
+      p.pub_valor,
+      p.pub_descricao,
+      i.item_titulo,
+      i.item_status,
+      i.item_autor,
+      i.item_editora,
+      i.item_datadepublicacao,
+      i.item_isbnCode,
+      i.item_tipo,
+      img.imagem_caminho AS imagem,
+      u.user_nome,
+      u.user_sobrenome,
+      u.user_celular
+    FROM tb_publicacoes p
+    JOIN tb_item i ON p.item_id = i.item_id
+    LEFT JOIN tb_imagens img ON img.pub_id = p.pub_id
+    JOIN tb_users u ON p.user_id = u.user_id
+    WHERE p.pub_id = ?
+  `;
+
+  db.query(sql, [pubId], (err, results) => {
+    if (err) {
+      console.error('Erro ao buscar detalhes da publicação:', err);
+      return res.status(500).json({ success: false, message: 'Erro ao buscar detalhes da publicação', error: err });
+    }
+    if (results.length === 0) {
+      return res.status(404).json({ success: false, message: 'Publicação não encontrada' });
+    }
+    res.json({ success: true, data: results[0] });
+  });
 });
 
 const PORT = 3000;
