@@ -11,39 +11,83 @@ const db = mysql.createConnection({
   host: 'localhost',
   user: 'root',
   password: '',
-  database: 'bookhub',
+  database: 'tb_bookhub',
   port: 3307
 });
 
 db.connect(err => {
-  if (err) {
+  if (err) {  
     console.error('Erro ao conectar ao MySQL:', err);
   } else {
     console.log('Conectado ao MySQL com sucesso!');
   }
 });
 
-  app.post('/pesquisar', (req, res) => {
-    const { pesquisa } = req.body;
-    const pesquisaFormatada = `%${pesquisa}%`;
+app.post('/pesquisar', (req, res) => {
+  const { pesquisa } = req.body;
 
-    const sql = `
-    SELECT * FROM tb_publicacoes WHERE pub_titulo LIKE ?
-    `;
+  if (!pesquisa) {
+    return res.status(400).json({ success: false, message: 'Pesquisa não fornecida.' });
+  }
 
-    db.query(sql, [pesquisaFormatada], (err, results) => {
-      if (err) {
-        console.error('Erro ao buscar publicações:', err);
-        return res.status(500).json({ success: false, message: 'Erro ao buscar publicações', error: err });
-      }
+  if (typeof pesquisa !== 'object' || pesquisa === null) {
+    return res.status(400).json({ success: false, message: 'Pesquisa inválida.' });
+  }
 
-      if (results.length === 0) {
-        return res.status(404).json({ success: false, message: 'Nenhuma publicação encontrada' });
-      }
+  const itemTipoMap = { 'Venda': 1, 'Doação': 0, 'Troca': 2 };
+  const pubTipoMap = { 'Coleção': 0, 'Unidade': 1 };
 
-      res.json({ success: true, data: results });
-    })
-  })
+  let { titulo, tipo, itemTipo, generos } = pesquisa;
+
+  let itemTipoValue = itemTipoMap[itemTipo];
+  if (itemTipo === 'Todos' || !itemTipo) itemTipoValue = null;
+
+  let pubTipoValue = pubTipoMap[tipo];
+  if (tipo === 'Todos' || !tipo) pubTipoValue = null;
+
+  let sql = `
+    SELECT DISTINCT 
+      p.pub_id,
+      p.pub_titulo,
+      p.pub_valor,
+      p.pub_tipo,
+      i.item_tipo,
+      u.user_nome,
+      img.imagem_caminho AS imagem
+    FROM tb_publicacoes p
+    JOIN tb_item i ON p.item_id = i.item_id
+    LEFT JOIN tb_publicacao_genero pg ON p.pub_id = pg.pub_id
+    JOIN tb_users u ON p.user_id = u.user_id
+    LEFT JOIN tb_imagens img ON img.pub_id = p.pub_id
+    WHERE 1=1
+  `;
+  const params = [];
+
+  if (titulo) {
+    sql += ' AND p.pub_titulo LIKE ?';
+    params.push(`%${titulo}%`);
+  }
+  if (pubTipoValue !== null && pubTipoValue !== undefined) {
+    sql += ' AND p.pub_tipo = ?';
+    params.push(pubTipoValue);
+  }
+  if (itemTipoValue !== null && itemTipoValue !== undefined) {
+    sql += ' AND i.item_tipo = ?';
+    params.push(itemTipoValue);
+  }
+  if (Array.isArray(generos) && generos.length > 0) {
+    sql += ` AND pg.genero_id IN (${generos.map(() => '?').join(', ')})`;
+    params.push(...generos);
+  }
+
+  db.query(sql, params, (err, results) => {
+    if (err) {
+      console.error('Erro ao pesquisar:', err);
+      return res.status(500).json({ success: false, message: 'Erro ao pesquisar', error: err });
+    }
+    res.json({ success: true, data: results });
+  });
+});
 
 app.post('/login', (req, res) => {
   const { usuario, senha } = req.body;
@@ -131,6 +175,7 @@ app.get('/receberPUBS', (req, res) => {
       p.pub_id,
       p.pub_titulo,
       p.pub_tipo,
+      p.pub_valor,
       i.item_tipo,
       img.imagem_caminho AS imagem
     FROM tb_publicacoes p
@@ -146,6 +191,27 @@ app.get('/receberPUBS', (req, res) => {
     res.json({ success: true, data: results });
   });
 }); 
+
+app.get('/receberGeneros', (req, res) => {
+  const sql = `
+    SELECT 
+      g.genero_id,
+      g.genero_nome
+    FROM tb_genero g
+    ORDER BY g.genero_nome
+  `;
+
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error('Erro ao buscar gêneros:', err);
+      return res.status(500).json({ success: false, message: 'Erro ao buscar gêneros', error: err });
+    } else {
+      res.json({ success: true, data: results });
+    }
+  })
+
+
+});
 
 app.post('/popularAleatorio', (req, res) => {
   const numRegistros = req.body.qtd || 10;
@@ -217,6 +283,47 @@ app.post('/popularAleatorio', (req, res) => {
 
   inserirProximo(0);
 });
+
+app.get('/detalhesPUB/:pubId', (req, res) => {
+  const { pubId } = req.params;
+
+  const sql = `
+    SELECT 
+      p.pub_id,
+      p.pub_titulo,
+      p.pub_tipo,
+      p.pub_valor,
+      p.pub_descricao,
+      i.item_titulo,
+      i.item_status,
+      i.item_autor,
+      i.item_editora,
+      i.item_datadepublicacao,
+      i.item_isbnCode,
+      i.item_tipo,
+      img.imagem_caminho AS imagem,
+      u.user_nome,
+      u.user_sobrenome,
+      u.user_celular
+    FROM tb_publicacoes p
+    JOIN tb_item i ON p.item_id = i.item_id
+    LEFT JOIN tb_imagens img ON img.pub_id = p.pub_id
+    JOIN tb_users u ON p.user_id = u.user_id
+    WHERE p.pub_id = ?
+  `;
+
+  db.query(sql, [pubId], (err, results) => {
+    if (err) {
+      console.error('Erro ao buscar detalhes da publicação:', err);
+      return res.status(500).json({ success: false, message: 'Erro ao buscar detalhes da publicação', error: err });
+    }
+    if (results.length === 0) {
+      return res.status(404).json({ success: false, message: 'Publicação não encontrada' });
+    }
+    res.json({ success: true, data: results[0] });
+  });
+});
+
 
 const PORT = 3000;
 
