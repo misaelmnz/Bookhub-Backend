@@ -168,13 +168,14 @@ app.post('/cadastro', (req, res) => {
   });
 });
 
-app.get('/receberPUBS', (req, res) => {  
+app.get('/receberPUBS', (req, res) => {
 
   const sql = `
     SELECT 
       p.pub_id,
       p.pub_titulo,
       p.pub_tipo,
+      p.pub_valor,
       p.pub_valor,
       i.item_tipo,
       img.imagem_caminho AS imagem
@@ -220,7 +221,7 @@ app.post('/popularAleatorio', (req, res) => {
     if (i >= numRegistros) {
       return res.json({ success: true, message: `${numRegistros} registros inseridos com sucesso!` });
     }
-      const item = {
+    const item = {
       isbn: faker.string.numeric(13),
       titulo: faker.commerce.productName(),
       autor: faker.person.fullName(),
@@ -239,7 +240,7 @@ app.post('/popularAleatorio', (req, res) => {
           return res.status(500).json({ success: false, error: err.message });
         }
         const itemId = itemResult.insertId;
-        
+
         db.query('SELECT user_id FROM tb_users ORDER BY RAND() LIMIT 1', (err, userResults) => {
           if (err) {
             console.error('Erro ao buscar usuário aleatório:', err);
@@ -250,36 +251,40 @@ app.post('/popularAleatorio', (req, res) => {
           }
           const userId = userResults[0].user_id;
 
-        const pub = {
-          titulo: faker.commerce.productName(),
-          tipoVenda: faker.helpers.arrayElement([1,2,3]),
-          idItem: itemId,
-          userId: userId
-        };
+          const pub = {
+            titulo: faker.commerce.productName(),
+            tipoVenda: faker.helpers.arrayElement([1, 2, 3]),
+            idItem: itemId,
+            userId: userId
+          };
 
-        db.query(
-          'INSERT INTO tb_publicacoes (pub_titulo, pub_tipo, item_id, user_id) VALUES (?, ?, ?, ?)',
-          [pub.titulo, pub.tipoVenda, pub.idItem, pub.userId],
-          (err, pubResult) => {
-            if (err) {
-              console.error('Erro ao inserir publicação:', err);
-              return res.status(500).json({ success: false, error: err.message });
-            }
-            const pubId = pubResult.insertId;
+          db.query(
+            'INSERT INTO tb_publicacoes (pub_titulo, pub_tipo, item_id, user_id) VALUES (?, ?, ?, ?)',
+            [pub.titulo, pub.tipoVenda, pub.idItem, pub.userId],
+            (err, pubResult) => {
+              if (err) {
+                console.error('Erro ao inserir publicação:', err);
+                return res.status(500).json({ success: false, error: err.message });
+              }
+              const pubId = pubResult.insertId;
 
-            // Inserir imagem
-            const imagemUrl = faker.image.url();
-            db.query(
-              'INSERT INTO tb_imagens (id_pub, imagem_caminho) VALUES (?, ?)',
-              [pubId, imagemUrl],
-              (err) => {
-                if (err) {
-                  console.error('Erro ao inserir imagem:', err);
-                  return res.status(500).json({ success: false, error: err.message });
-                }
-                inserirProximo(i + 1);
+              // Inserir imagem
+              const imagemUrl = faker.image.url();
+              db.query(
+                'INSERT INTO tb_imagens (id_pub, imagem_caminho) VALUES (?, ?)',
+                [pubId, imagemUrl],
+                (err) => {
+                  if (err) {
+                    console.error('Erro ao inserir imagem:', err);
+                    return res.status(500).json({ success: false, error: err.message });
+                  }
+                  inserirProximo(i + 1);
 
-              });});});});}
+                });
+            });
+        });
+      });
+  }
 
   inserirProximo(0);
 });
@@ -323,7 +328,6 @@ app.get('/detalhesPUB/:pubId', (req, res) => {
     res.json({ success: true, data: results[0] });
   });
 });
-
 
 const PORT = 3000;
 
