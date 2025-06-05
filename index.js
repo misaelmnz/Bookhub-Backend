@@ -2,10 +2,15 @@ const express = require('express');
 const mysql = require('mysql');
 const cors = require('cors');
 const { faker } = require('@faker-js/faker');
+const jwt = require('jsonwebtoken');
+const bodyParser = require('body-parser')
+
+const SECRET_KEY = 'SECRET_KEY';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(bodyParser.json())
 
 const db = mysql.createConnection({
   host: 'localhost',
@@ -14,6 +19,7 @@ const db = mysql.createConnection({
   database: 'tb_bookhub',
   port: 3307
 });
+
 
 db.connect(err => {
   if (err) {  
@@ -105,7 +111,13 @@ app.post('/login', (req, res) => {
     }
 
     if (results.length > 0) {
-      res.json({ success: true, message: 'Login realizado com sucesso' });
+      const user = results[0];
+      const token = jwt.sign(
+        {id: user.user_id, nome: user.user_nome, email: user.user_email},
+        SECRET_KEY,
+        { expiresIn: '1h'}
+      );
+      res.json({ success: true, message: 'Login realizado com sucesso', token, user});
     } else {
       res.status(401).json({ success: false, message: 'Usuário não localizado ou dados incorretos.' });
     }
