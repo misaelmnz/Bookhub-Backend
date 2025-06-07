@@ -2,10 +2,15 @@ const express = require('express');
 const mysql = require('mysql');
 const cors = require('cors');
 const { faker } = require('@faker-js/faker');
+const jwt = require('jsonwebtoken');
+const bodyParser = require('body-parser')
+
+const SECRET_KEY = 'SECRET_KEY';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(bodyParser.json())
 
 const db = mysql.createConnection({
   host: 'localhost',
@@ -14,6 +19,7 @@ const db = mysql.createConnection({
   database: 'db_bookhub',
   port: 3306
 });
+
 
 db.connect(err => {
   if (err) {
@@ -25,25 +31,72 @@ db.connect(err => {
 
 app.post('/pesquisar', (req, res) => {
   const { pesquisa } = req.body;
-  const pesquisaFormatada = `%${pesquisa}%`;
 
-  const sql = `
-    SELECT * FROM tb_publicacoes WHERE pub_titulo LIKE ?
-    `;
+  if (!pesquisa) {
+    return res.status(400).json({ success: false, message: 'Pesquisa não fornecida.' });
+  }
 
-  db.query(sql, [pesquisaFormatada], (err, results) => {
+  if (typeof pesquisa !== 'object' || pesquisa === null) {
+    return res.status(400).json({ success: false, message: 'Pesquisa inválida.' });
+  }
+
+  const itemTipoMap = { 'Venda': 1, 'Doação': 0, 'Troca': 2 };
+  const pubTipoMap = { 'Coleção': 0, 'Unidade': 1 };
+
+  let { titulo, tipo, itemTipo, generos } = pesquisa;
+
+  let itemTipoValue = itemTipoMap[itemTipo];
+  if (itemTipo === 'Todos' || !itemTipo) itemTipoValue = null;
+
+  let pubTipoValue = pubTipoMap[tipo];
+  if (tipo === 'Todos' || !tipo) pubTipoValue = null;
+
+  let sql = `
+    SELECT DISTINCT 
+      p.pub_id,
+      p.pub_titulo,
+      p.pub_valor,
+      p.pub_tipo,
+      i.item_tipo,
+      u.user_nome,
+      img.imagem_caminho AS imagem
+    FROM tb_publicacoes p
+    JOIN tb_item i ON p.item_id = i.item_id
+    LEFT JOIN tb_publicacao_genero pg ON p.pub_id = pg.pub_id
+    JOIN tb_users u ON p.user_id = u.user_id
+    LEFT JOIN tb_imagens img ON img.pub_id = p.pub_id
+    WHERE 1=1
+  `;
+  
+  const params = [];
+
+  if (titulo) {
+    sql += ' AND p.pub_titulo LIKE ?';
+    params.push(`%${titulo}%`);
+  }
+  if (pubTipoValue !== null && pubTipoValue !== undefined) {
+    sql += ' AND p.pub_tipo = ?';
+    params.push(pubTipoValue);
+  }
+  if (itemTipoValue !== null && itemTipoValue !== undefined) {
+    sql += ' AND i.item_tipo = ?';
+    params.push(itemTipoValue);
+  }
+  if (Array.isArray(generos) && generos.length > 0) {
+    sql += ` AND pg.genero_id IN (${generos.map(() => '?').join(', ')})`;
+    params.push(...generos);
+  }
+
+  sql += ' GROUP BY p.pub_id';
+
+  db.query(sql, params, (err, results) => {
     if (err) {
-      console.error('Erro ao buscar publicações:', err);
-      return res.status(500).json({ success: false, message: 'Erro ao buscar publicações', error: err });
+      console.error('Erro ao pesquisar:', err);
+      return res.status(500).json({ success: false, message: 'Erro ao pesquisar', error: err });
     }
-
-    if (results.length === 0) {
-      return res.status(404).json({ success: false, message: 'Nenhuma publicação encontrada' });
-    }
-
     res.json({ success: true, data: results });
-  })
-})
+  });
+});
 
 app.post('/login', (req, res) => {
   const { usuario, senha } = req.body;
@@ -61,7 +114,13 @@ app.post('/login', (req, res) => {
     }
 
     if (results.length > 0) {
-      res.json({ success: true, message: 'Login realizado com sucesso' });
+      const user = results[0];
+      const token = jwt.sign(
+        { id: user.user_id, nome: user.user_nome, email: user.user_email },
+        SECRET_KEY,
+        { expiresIn: '1h' }
+      );
+      res.json({ success: true, message: 'Login realizado com sucesso', token, user });
     } else {
       res.status(401).json({ success: false, message: 'Usuário não localizado ou dados incorretos.' });
     }
@@ -132,11 +191,13 @@ app.get('/receberPUBS', (req, res) => {
       p.pub_titulo,
       p.pub_tipo,
       p.pub_valor,
+      p.pub_valor,
       i.item_tipo,
       img.imagem_caminho AS imagem
     FROM tb_publicacoes p
     JOIN tb_item i ON p.item_id = i.item_id
     LEFT JOIN tb_imagens img ON img.pub_id = p.pub_id
+    GROUP BY p.pub_id
   `;
 
   db.query(sql, (err, results) => {
@@ -146,6 +207,27 @@ app.get('/receberPUBS', (req, res) => {
     }
     res.json({ success: true, data: results });
   });
+});
+
+app.get('/receberGeneros', (req, res) => {
+  const sql = `
+    SELECT 
+      g.genero_id,
+      g.genero_nome
+    FROM tb_genero g
+    ORDER BY g.genero_nome
+  `;
+
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error('Erro ao buscar gêneros:', err);
+      return res.status(500).json({ success: false, message: 'Erro ao buscar gêneros', error: err });
+    } else {
+      res.json({ success: true, data: results });
+    }
+  })
+
+
 });
 
 app.post('/popularAleatorio', (req, res) => {
@@ -259,7 +341,39 @@ app.get('/detalhesPUB/:pubId', (req, res) => {
     if (results.length === 0) {
       return res.status(404).json({ success: false, message: 'Publicação não encontrada' });
     }
-    res.json({ success: true, data: results[0] });
+
+    // Extrair informações comuns do primeiro registro
+    const {
+      pub_id, pub_titulo, pub_tipo, pub_valor, pub_descricao,
+      item_titulo, item_status, item_autor, item_editora,
+      item_datadepublicacao, item_isbnCode, item_tipo,
+      user_nome, user_sobrenome, user_celular
+    } = results[0];
+
+    // Extrair todas as imagens
+    const imagens = results.map(row => row.imagem).filter(img => img);
+
+    res.json({
+      success: true,
+      data: {
+        pub_id,
+        pub_titulo,
+        pub_tipo,
+        pub_valor,
+        pub_descricao,
+        item_titulo,
+        item_status,
+        item_autor,
+        item_editora,
+        item_datadepublicacao,
+        item_isbnCode,
+        item_tipo,
+        user_nome,
+        user_sobrenome,
+        user_celular,
+        imagens
+      }
+    });
   });
 });
 
