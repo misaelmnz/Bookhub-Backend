@@ -29,6 +29,94 @@ db.connect(err => {
   }
 });
 
+app.post('/verifyPub', (req, res) => {
+  const { pub_id } = req.body;
+  const sql = `
+  SELECT * FROM tb_publicacoes WHERE pub_id = ?
+  `;
+
+  db.query(sql, [pub_id], (err, results) => {
+    if (err) {
+      console.error('Erro ao verificar publicação:', err);
+      return res.status(500).json({ success: false, message: 'Erro ao verificar publicação', error: err });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({ success: false, message: 'Publicação não encontrada.' });
+    }
+    res.json({ success: true, data: results[0] });
+  })
+});
+
+app.delete('/deletePubs', (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  const { item_id } = req.body;
+
+  if (!item_id && item_id !== 0) {
+    return res.status(400).json({ success: false, message: 'ID do item não fornecido.' });
+  };
+  if (!token) {
+    return res.status(401).json({ success: false, message: 'Token não fornecido.' });
+  };
+
+  const sql = `
+  DELETE FROM tb_item WHERE item_id = ?
+  `; 
+  
+  jwt.verify(token, SECRET_KEY, (err, decoded) => {
+    if (err) {
+      console.error('Erro ao verificar token:', err);
+      return res.status(401).json({ success: false, message: 'Token inválido.' });
+    };
+
+    db.query(sql, [item_id], (err, results) => {
+      if (err) {
+        console.error('Erro ao buscar publicações do usuário:', item_id, err);
+        return res.status(500).json({ success: false, message: 'Erro ao buscar publicações do usuário', error: err });
+      }
+
+      if (!results || results.length === 0) {
+        return res.status(404).json({ success: false, message: 'Nenhuma publicação encontrada.' });
+      }
+
+      res.json({ success: true, data: results });
+      console.info(res)
+    });
+  });
+});
+
+app.get('/userPUBs', (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) {
+    return res.status(401).json({ success: false, message: 'Token não fornecido.' });
+  }
+
+  const sql = `
+    SELECT * FROM tb_publicacoes p
+    JOIN tb_imagens img ON p.pub_id = img.pub_id
+    JOIN tb_item i ON p.item_id = i.item_id
+    WHERE p.user_id = ?
+  `
+  
+  jwt.verify(token, SECRET_KEY, (err, decoded) => {
+    if (err) {
+    console.error('Erro ao verificar token:', err);
+    return res.status(401).json({ success: false, message: 'Token inválido. ' });
+    }
+      const userId = decoded.id;
+      db.query(sql, [userId], (err, results) => {
+        if (err) {
+          console.error('Erro ao buscar publicações do usuário:', err);
+          return res.status(500).json({ success: false, message: 'Erro ao buscar publicações do usuário', error: err });
+        }
+        if (!results || results.length === 0) {
+          return res.status(404).json({ success: false, message: 'Nenhuma publicação encontrada.' });
+        }
+        res.json({ success: true, data: results });
+      });
+  });
+});
+
 app.post('/pesquisar', (req, res) => {
   const { pesquisa } = req.body;
 
@@ -115,7 +203,7 @@ app.post('/login', (req, res) => {
       const token = jwt.sign(
         {id: user.user_id, nome: user.user_nome, email: user.user_email},
         SECRET_KEY,
-        { expiresIn: '1h'}
+        { expiresIn: '24h'}
       );
       res.json({ success: true, message: 'Login realizado com sucesso', token, user});
     } else {
