@@ -4,7 +4,6 @@ const cors = require('cors');
 const { faker } = require('@faker-js/faker');
 const jwt = require('jsonwebtoken');
 const bodyParser = require('body-parser')
-
 const SECRET_KEY = 'SECRET_KEY';
 
 const app = express();
@@ -19,6 +18,7 @@ const db = mysql.createConnection({
   database: 'tb_bookhub',
   port: 3307
 });
+
 
 
 db.connect(err => {
@@ -276,12 +276,12 @@ app.get('/receberPUBS', (req, res) => {
       p.pub_titulo,
       p.pub_tipo,
       p.pub_valor,
-      p.pub_valor,
       i.item_tipo,
       img.imagem_caminho AS imagem
     FROM tb_publicacoes p
     JOIN tb_item i ON p.item_id = i.item_id
     LEFT JOIN tb_imagens img ON img.pub_id = p.pub_id
+    GROUP BY p.pub_id
   `;
 
   db.query(sql, (err, results) => {
@@ -292,6 +292,27 @@ app.get('/receberPUBS', (req, res) => {
     res.json({ success: true, data: results });
   });
 }); 
+
+app.get('/receberGeneros', (req, res) => {
+  const sql = `
+    SELECT 
+      g.genero_id,
+      g.genero_nome
+    FROM tb_genero g
+    ORDER BY g.genero_nome
+  `;
+
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error('Erro ao buscar gêneros:', err);
+      return res.status(500).json({ success: false, message: 'Erro ao buscar gêneros', error: err });
+    } else {
+      res.json({ success: true, data: results });
+    }
+  })
+
+
+});
 
 app.get('/receberGeneros', (req, res) => {
   const sql = `
@@ -425,7 +446,39 @@ app.get('/detalhesPUB/:pubId', (req, res) => {
     if (results.length === 0) {
       return res.status(404).json({ success: false, message: 'Publicação não encontrada' });
     }
-    res.json({ success: true, data: results[0] });
+
+    // Extrair informações comuns do primeiro registro
+    const {
+      pub_id, pub_titulo, pub_tipo, pub_valor, pub_descricao,
+      item_titulo, item_status, item_autor, item_editora,
+      item_datadepublicacao, item_isbnCode, item_tipo,
+      user_nome, user_sobrenome, user_celular
+    } = results[0];
+
+    // Extrair todas as imagens
+    const imagens = results.map(row => row.imagem).filter(img => img);
+
+    res.json({
+      success: true,
+      data: {
+        pub_id,
+        pub_titulo,
+        pub_tipo,
+        pub_valor,
+        pub_descricao,
+        item_titulo,
+        item_status,
+        item_autor,
+        item_editora,
+        item_datadepublicacao,
+        item_isbnCode,
+        item_tipo,
+        user_nome,
+        user_sobrenome,
+        user_celular,
+        imagens
+      }
+    });
   });
 });
 
