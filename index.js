@@ -19,14 +19,156 @@ const db = mysql.createConnection({
   port: 3307
 });
 
-
-
 db.connect(err => {
   if (err) {  
     console.error('Erro ao conectar ao MySQL:', err);
   } else {
     console.log('Conectado ao MySQL com sucesso!');
   }
+});
+
+app.get('/userInfo', (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+
+  const sql = `
+    SELECT * FROM tb_users WHERE user_id = ?
+  `
+  jwt.verify(token, SECRET_KEY, (err, decoded) => {
+      if(err) {
+        console.error(err)
+        return res.status(401).json({ success: false, message: 'Token inválido.'})
+      }
+        const user_id = decoded.id;
+        db.query(sql, [user_id], (err, results) => {
+          if(err) {
+            console.error(err)
+            return res.status(404).json({ success: false, message: 'Erro ao buscar informações do Usuário'})
+          }
+          res.json({ success: true, data: results});
+    })
+  })
+})
+
+app.post('/criarPub', (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1]
+  // -- Ordem de Criaçao de PUB = Item, Genero, Pub, Imagem
+  const {
+    item_isbnCode,
+    item_titulo,
+    item_autor, 
+    item_editora,
+    item_datadepublicacao,
+    item_status,
+    item_tipo,
+    imagem_caminho,
+    pub_tipo,
+    pub_titulo,
+    pub_valor,
+    pub_pagamento,
+    pub_descricao,
+    genero_id
+  } = req.body
+
+  const sqlCreateItem = `
+    INSERT INTO tb_item (
+    item_isbnCode,
+    item_titulo,
+    item_autor, 
+    item_editora,
+    item_datadepublicacao,
+    item_status,
+    item_tipo
+    ) VALUES (?,?,?,?,?,?,?)
+  `
+
+  const sqlCreatePub = `
+    INSERT INTO tb_publicacoes (
+    pub_tipo,
+    pub_titulo,
+    pub_valor,
+    pub_pagamento,
+    pub_descricao,
+    item_id,
+    user_id
+    ) VALUES (?,?,?,?,?,?,?)
+  ` 
+
+  const sqlCreateImage = `
+    INSERT INTO tb_imagens (
+    imagem_caminho,
+    pub_id
+  ) VALUES (?,?)
+  `
+
+  jwt.verify(token, SECRET_KEY, (err, decoded) => {
+    if (err) {
+      console.error('Erro ao verificar token:', err);
+      return res.status(401).json({ success: false, message: 'Token inválido.' });
+    };
+
+    const user_id = decoded.id;
+
+    db.query(sqlCreateItem, [item_isbnCode,
+    item_titulo,
+    item_autor, 
+    item_editora,
+    item_datadepublicacao,
+    item_status,
+    item_tipo], (err, itemResult) => {
+      if (err) {
+        console.error('Erro ao inserir item', err);
+        return res.status(500).json({success: false, message: err})
+      }
+      const item_id = itemResult.insertId;
+      console.log(itemResult);
+
+      db.query(sqlCreatePub, [
+        pub_tipo,
+        pub_titulo,
+        pub_valor,
+        pub_pagamento,
+        pub_descricao,
+        item_id,
+        user_id,
+      ], (err, pubResult) => {
+        if (err) {
+          console.error('Erro ao inserir publicação', err);
+          return res.status(500).json({success: false, message: err})
+        }
+        const pub_id = pubResult.insertId;
+        const values = genero_id.map(id => [id, pub_id]);
+        
+        console.log(pubResult);
+
+        db.query(sqlCreateImage, [
+          imagem_caminho,
+          pub_id
+        ], (err, ImgResult) => {
+          if (err) {
+            confirm.error('Erro ao inserir publicação', err);
+            return res.status(500).json({success: false, message: err})
+          }
+          console.log(ImgResult);
+          if (Array.isArray(genero_id) && genero_id.length > 0) {
+            const values = genero_id.map(id => [id, pub_id]);
+            db.query(
+              'INSERT INTO tb_publicacao_genero (genero_id, pub_id) VALUES ?',
+              [values],
+              (err, genResult) => {
+                if (err) {
+                  console.error('Erro ao inserir gêneros', err);
+                  return res.status(500).json({ success: false, message: err });
+                }
+                res.json({ success: true, message: 'Publicação criada com sucesso', pub_id });
+              }
+            );
+          } else {
+            res.json({ success: true, message: 'Publicação criada com sucesso', pub_id });
+          }
+        });
+      });
+    });
+  });
 });
 
 app.post('/verifyPub', (req, res) => {
@@ -155,6 +297,7 @@ app.post('/pesquisar', (req, res) => {
     LEFT JOIN tb_imagens img ON img.pub_id = p.pub_id
     WHERE 1=1
   `;
+  
   const params = [];
 
   if (titulo) {
@@ -173,6 +316,8 @@ app.post('/pesquisar', (req, res) => {
     sql += ` AND pg.genero_id IN (${generos.map(() => '?').join(', ')})`;
     params.push(...generos);
   }
+
+  sql += ' GROUP BY p.pub_id';
 
   db.query(sql, params, (err, results) => {
     if (err) {
@@ -292,27 +437,6 @@ app.get('/receberPUBS', (req, res) => {
     res.json({ success: true, data: results });
   });
 }); 
-
-app.get('/receberGeneros', (req, res) => {
-  const sql = `
-    SELECT 
-      g.genero_id,
-      g.genero_nome
-    FROM tb_genero g
-    ORDER BY g.genero_nome
-  `;
-
-  db.query(sql, (err, results) => {
-    if (err) {
-      console.error('Erro ao buscar gêneros:', err);
-      return res.status(500).json({ success: false, message: 'Erro ao buscar gêneros', error: err });
-    } else {
-      res.json({ success: true, data: results });
-    }
-  })
-
-
-});
 
 app.get('/receberGeneros', (req, res) => {
   const sql = `
@@ -481,6 +605,7 @@ app.get('/detalhesPUB/:pubId', (req, res) => {
     });
   });
 });
+
 
 const PORT = 3000;
 
