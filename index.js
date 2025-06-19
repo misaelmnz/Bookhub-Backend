@@ -15,8 +15,8 @@ const db = mysql.createConnection({
   host: 'localhost',
   user: 'root',
   password: '',
-  database: 'tb_bookhub',
-  port: 3307
+  database: 'db_bookhub',
+  port: 3306
 });
 
 db.connect(err => {
